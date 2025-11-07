@@ -584,3 +584,13 @@ CITATION_DICT["CUOPT"] = \
   date = { 2025-05-29 }
 }
 """
+
+CITATION_DICT["GUROBI"] = \
+"""
+@manual{MindOpt,
+  author = {MindOpt, LLC},
+  title  = {MindOpt Documentation},
+  year   = 2024,
+  url    = {https://mindopt.tech/doc/mindopt/latest/html/index.html}
+}
+"""

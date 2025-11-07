@@ -119,6 +119,8 @@ The table below shows the types of problems the supported solvers can handle.
 +----------------+----+----+------+-----+-----+-----+-----+
 | `KNITRO`_      | X  | X  | X    | X   | X   | X   | X   |
 +----------------+----+----+------+-----+-----+-----+-----+
+| `MINDOPT`_     | X  | X  | X    | X   |     |     | X   |
++----------------+----+----+------+-----+-----+-----+-----+
 
 (*) Mixed-integer LP only.
 
@@ -295,7 +297,7 @@ cached previous solution as described above (rather than from the ``value`` fiel
 Setting solver options
 ----------------------
 
-The `OSQP`_, `ECOS`_, `GLOP`_, `MOSEK`_, `MPAX`_, `CBC`_, `CVXOPT`_, `NAG`_, `PDLP`_, `QOCO`_, `GUROBI`_, `SCS`_ , `CLARABEL`_, `DAQP`_, `PIQP`_, `PROXQP`_, `CUOPT`_ and `KNITRO`_ Python interfaces allow you to set solver options such as the maximum number of iterations. You can pass these options along through CVXPY as keyword arguments.
+The `OSQP`_, `ECOS`_, `GLOP`_, `MOSEK`_, `MPAX`_, `CBC`_, `CVXOPT`_, `NAG`_, `PDLP`_, `QOCO`_, `GUROBI`_, `SCS`_ , `CLARABEL`_, `DAQP`_, `PIQP`_, `PROXQP`_, `CUOPT`_, `KNITRO`_ and `MINDOPT`_ Python interfaces allow you to set solver options such as the maximum number of iterations. You can pass these options along through CVXPY as keyword arguments.
 
 For example, here we tell SCS to use an indirect method for solving linear equations rather than a direct method.
 
@@ -865,6 +867,21 @@ Here is the complete list of solver options.
 
     For others see `QPALM documentation <https://kul-optec.github.io/QPALM/Doxygen/structQPALMSettings.html>`_.
 
+.. info:: `MINDOPT`_ options:
+    :collapsible:
+
+    MindOpt solver options are specified in CVXPY as keyword arguments. The full list of MindOpt parameters with defaults is listed `here <https://mindopt.tech/doc/mindopt/latest/html/API2/param/index.html>`_.
+
+    In addition to MindOpt's parameters, the following options are available:
+
+    ``'env'``
+        Allows for the passage of a MindOpt Environment, which specifies parameters and license information.  Keyword arguments will override any settings in this environment.
+
+    ``reoptimize``
+        A boolean. This is only relevant for problems where MINDOPT initially produces an "infeasible or unbounded" status.
+        Its default value is False. If set to True, then if MINDOPT produces an "infeasible or unbounded" status, its algorithm
+        parameters are automatically changed and the problem is re-solved in order to determine its precise status.
+
 Custom Solvers
 ------------------------------------
 Although ``cvxpy`` supports many different solvers out of the box, it is also possible to define and use custom solvers. This can be helpful in prototyping or developing custom solvers tailored to a specific application.
@@ -932,3 +949,4 @@ will be the same as the class variable ``SUPPORTED_CONSTRAINTS``.
 .. _QPALM: https://kul-optec.github.io/QPALM/Doxygen/index.html
 .. _CUOPT: https://github.com/NVIDIA/cuopt
 .. _KNITRO: https://www.artelys.com/knitro/
+.. _MINDOPT: https://mindopt.tech/portal

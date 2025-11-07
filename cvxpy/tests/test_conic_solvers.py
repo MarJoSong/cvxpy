@@ -2974,3 +2974,279 @@ class TestCUOPT(unittest.TestCase):
 
     def test_cuopt_mi_lp_7(self) -> None:
         StandardTestLPs.test_mi_lp_5(solver='CUOPT', **TestCUOPT.kwargs, time_limit=5)
+
+@unittest.skipUnless('MINDOPT' in INSTALLED_SOLVERS, 'MINDOPT is not installed.')
+class TestMINDOPT(BaseTest):
+    """NOTE: solves of LPs (or MILPs) get routed through MINDOPT's QP interface!
+    So many of these tests are testing the behavior of mindopt_qpif.py"""
+
+    def setUp(self) -> None:
+        self.a = cp.Variable(name='a')
+        self.b = cp.Variable(name='b')
+        self.c = cp.Variable(name='c')
+
+        self.x = cp.Variable(2, name='x')
+        self.y = cp.Variable(3, name='y')
+        self.z = cp.Variable(2, name='z')
+
+        self.A = cp.Variable((2, 2), name='A')
+        self.B = cp.Variable((2, 2), name='B')
+        self.C = cp.Variable((3, 2), name='C')
+
+    def test_mindopt_warm_start(self) -> None:
+        """Make sure that warm starting MindOpt behaves as expected
+           Note: This only checks output, not whether or not MindOpt is warm starting internally
+        """
+        if cp.MINDOPT in INSTALLED_SOLVERS:
+            import mindoptpy
+            import numpy as np
+
+            A = cp.Parameter((2, 2))
+            b = cp.Parameter(2)
+            h = cp.Parameter(2)
+            c = cp.Parameter(2)
+
+            A.value = np.array([[1, 0], [0, 0]])
+            b.value = np.array([1, 0])
+            h.value = np.array([2, 2])
+            c.value = np.array([1, 1])
+
+            objective = cp.Maximize(c[0] * self.x[0] + c[1] * self.x[1])
+            constraints = [self.x[0]**2 <= h[0]**2,
+                           self.x[1] <= h[1],
+                           A @ self.x == b]
+            prob = cp.Problem(objective, constraints)
+            result = prob.solve(solver=cp.MINDOPT, warm_start=True)
+            self.assertAlmostEqual(result, 3)
+            self.assertItemsAlmostEqual(self.x.value, [1, 2])
+
+            # Change A and b from the original values
+            A.value = np.array([[0, 0], [0, 1]])   # <----- Changed
+            b.value = np.array([0, 1])              # <----- Changed
+            h.value = np.array([2, 2])
+            c.value = np.array([1, 1])
+
+            # Without setting update_eq_constrs = False,
+            # the results should change to the correct answer
+            result = prob.solve(solver=cp.MINDOPT, warm_start=True)
+            self.assertAlmostEqual(result, 3)
+            self.assertItemsAlmostEqual(self.x.value, [2, 1])
+
+            # Change h from the original values
+            A.value = np.array([[1, 0], [0, 0]])
+            b.value = np.array([1, 0])
+            h.value = np.array([1, 1])              # <----- Changed
+            c.value = np.array([1, 1])
+
+            # Without setting update_ineq_constrs = False,
+            # the results should change to the correct answer
+            result = prob.solve(solver=cp.MINDOPT, warm_start=True)
+            self.assertAlmostEqual(result, 2)
+            self.assertItemsAlmostEqual(self.x.value, [1, 1])
+
+            # Change c from the original values
+            A.value = np.array([[1, 0], [0, 0]])
+            b.value = np.array([1, 0])
+            h.value = np.array([2, 2])
+            c.value = np.array([2, 1])              # <----- Changed
+
+            # Without setting update_objective = False,
+            # the results should change to the correct answer
+            result = prob.solve(solver=cp.MINDOPT, warm_start=True)
+            self.assertEqual(result, 4)
+            self.assertItemsAlmostEqual(self.x.value, [1, 2])
+
+            # Try creating a new problem and setting x.value.
+            init_value = np.array([2, 3])
+            self.x.value = init_value
+            prob = cp.Problem(objective, constraints)
+            result = prob.solve(solver=cp.MINDOPT, warm_start=True)
+            self.assertEqual(result, 4)
+            self.assertItemsAlmostEqual(self.x.value, [1, 2])
+            # Check that "start" value was set appropriately.
+            model = prob.solver_stats.extra_stats
+            model_x = model.getVars()
+            for i in range(self.x.size):
+                assert init_value[i] == model_x[i].start
+                assert np.isclose(self.x.value[i], model_x[i].x)
+
+            # Test with matrix variable.
+            z = cp.Variable()
+            Y = cp.Variable((3, 2))
+            Y_val = np.reshape(np.arange(6), (3, 2))
+            Y.value = Y_val + 1
+            objective = cp.Maximize(z + cp.sum(Y))
+            constraints = [Y <= Y_val,
+                           z <= 2]
+            prob = cp.Problem(objective, constraints)
+            result = prob.solve(solver=cp.MINDOPT, warm_start=True)
+            self.assertEqual(result, Y_val.sum() + 2)
+            self.assertAlmostEqual(z.value, 2)
+            self.assertItemsAlmostEqual(Y.value, Y_val)
+            # Check that "start" value was set appropriately.
+            model = prob.solver_stats.extra_stats
+            model_x = model.getVars()
+            assert mindoptpy.GRB.UNDEFINED == model_x[0].start
+            assert np.isclose(2, model_x[0].x)
+            for i in range(1, Y.size + 1):
+                row = (i - 1) % Y.shape[0]
+                col = (i - 1) // Y.shape[0]
+                assert Y_val[row, col] + 1 == model_x[i].start
+                assert np.isclose(Y.value[row, col], model_x[i].x)
+
+        else:
+            with self.assertRaises(Exception) as cm:
+                prob = cp.Problem(cp.Minimize(cp.norm(self.x, 1)), [self.x == 0])
+                prob.solve(solver=cp.MINDOPT, warm_start=True)
+            self.assertEqual(str(cm.exception), "The solver %s is not installed." % cp.MINDOPT)
+
+    def test_mindopt_time_limit_no_solution(self) -> None:
+        """Make sure that if MindOpt terminates due to a time limit before finding a solution:
+            1) no error is raised,
+            2) solver stats are returned.
+            The test is skipped if something changes on MindOpt's side so that:
+            - a solution is found despite a time limit of zero,
+            - a different termination criteria is hit first.
+        """
+        if cp.MINDOPT in INSTALLED_SOLVERS:
+            import mindoptpy
+            objective = cp.Minimize(self.x[0])
+            constraints = [cp.square(self.x[0]) <= 1]
+            prob = cp.Problem(objective, constraints)
+            try:
+                prob.solve(solver=cp.MINDOPT, TimeLimit=0.0)
+            except Exception as e:
+                self.fail("An exception %s is raised instead of returning a result." % e)
+
+            extra_stats = None
+            solver_stats = getattr(prob, "solver_stats", None)
+            if solver_stats:
+                extra_stats = getattr(solver_stats, "extra_stats", None)
+            self.assertTrue(extra_stats, "Solver stats have not been returned.")
+
+            nb_solutions = getattr(extra_stats, "SolCount", None)
+            if nb_solutions:
+                self.skipTest("MindOpt has found a solution, the test is not relevant anymore.")
+
+            solver_status = getattr(extra_stats, "Status", None)
+            if solver_status != mindoptpy.GRB.TIME_LIMIT:
+                self.skipTest("MindOpt terminated for a different reason than reaching time limit, "
+                              "the test is not relevant anymore.")
+
+        else:
+            with self.assertRaises(Exception) as cm:
+                prob = cp.Problem(cp.Minimize(cp.norm(self.x, 1)), [self.x == 0])
+                prob.solve(solver=cp.MINDOPT, TimeLimit=0)
+            self.assertEqual(str(cm.exception), "The solver %s is not installed." % cp.MINDOPT)
+
+    def test_mindopt_environment(self) -> None:
+        """Tests that MindOpt environments can be passed to Model.
+        MindOpt environments can include licensing and model parameter data.
+        """
+        if cp.MINDOPT in INSTALLED_SOLVERS:
+            import mindoptpy
+
+            # Set a few parameters to random values close to their defaults
+            params = {
+                'MIP/GapRel': np.random.random(),  # range {0, INFINITY}
+                'NumThreads': np.random.randint(6),  # range {-1, MAXINT}
+            }
+
+            # Create a custom environment and set some parameters
+            custom_env = mindoptpy.Env()
+            for k, v in params.items():
+                custom_env.setParam(k, v)
+
+            # Testing Conic Solver Interface
+            sth = StandardTestSOCPs.test_socp_0(solver='MINDOPT', env=custom_env)
+            model = sth.prob.solver_stats.extra_stats
+            for k, v in params.items():
+                # https://www.mindopt.com/documentation/9.1/refman/py_model_getparaminfo.html
+                name, p_type, p_val, p_min, p_max, p_def = model.getParamInfo(k)
+                self.assertEqual(v, p_val)
+
+        else:
+            with self.assertRaises(Exception) as cm:
+                prob = cp.Problem(cp.Minimize(cp.norm(self.x, 1)), [self.x == 0])
+                prob.solve(solver=cp.MINDOPT, TimeLimit=0)
+            self.assertEqual(str(cm.exception), "The solver %s is not installed." % cp.MINDOPT)
+
+    def test_mindopt_lp_0(self) -> None:
+        StandardTestLPs.test_lp_0(solver='MINDOPT')
+
+    def test_mindopt_lp_1(self) -> None:
+        StandardTestLPs.test_lp_1(solver='MINDOPT')
+
+    def test_mindopt_lp_2(self) -> None:
+        StandardTestLPs.test_lp_2(solver='MINDOPT')
+
+    def test_mindopt_lp_3(self) -> None:
+        # MINDOPT initially produces an INFEASIBLE_OR_UNBOUNDED status
+        sth = sths.lp_3()
+        with self.assertWarns(Warning):
+            sth.prob.solve(solver='MINDOPT')
+            self.assertEqual(sth.prob.status, cp.settings.INFEASIBLE_OR_UNBOUNDED)
+        # The user disables presolve and so makes reoptimization unnecessary
+        StandardTestLPs.test_lp_3(solver='MINDOPT', InfUnbdInfo=1)
+        # The user determines the precise status with reoptimize=True
+        StandardTestLPs.test_lp_3(solver='MINDOPT', reoptimize=True)
+
+    def test_mindopt_lp_4(self) -> None:
+        StandardTestLPs.test_lp_4(solver='MINDOPT', reoptimize=True)
+
+    def test_mindopt_lp_5(self) -> None:
+        StandardTestLPs.test_lp_5(solver='MINDOPT')
+
+    def test_mindopt_lp_bound_attr(self) -> None:
+        sth = StandardTestLPs.test_lp_bound_attr(solver='MINDOPT')
+        # check that the bounds do reach the solver and don't just generate constraints
+        model = sth.prob.solver_stats.extra_stats
+        expected_bounds = sth.prob.variables()[0].bounds
+        actual_lb = [v.LB for v in model.getVars()]
+        actual_ub = [v.UB for v in model.getVars()]
+        np.testing.assert_equal([actual_lb, actual_ub], expected_bounds)
+
+    def test_mindopt_socp_0(self) -> None:
+        StandardTestSOCPs.test_socp_0(solver='MINDOPT')
+
+    def test_mindopt_socp_1(self) -> None:
+        StandardTestSOCPs.test_socp_1(solver='MINDOPT')
+
+    def test_mindopt_socp_2(self) -> None:
+        StandardTestSOCPs.test_socp_2(solver='MINDOPT')
+
+    def test_mindopt_socp_3(self) -> None:
+        # axis 0
+        StandardTestSOCPs.test_socp_3ax0(solver='MINDOPT')
+        # axis 1
+        StandardTestSOCPs.test_socp_3ax1(solver='MINDOPT')
+
+    def test_mindopt_socp_bound_attr(self) -> None:
+        sth = StandardTestSOCPs.test_socp_bounds_attr(solver='MINDOPT')
+        # check that the bounds do reach the solver and don't just generate constraints
+        model = sth.prob.solver_stats.extra_stats
+        x = model.getVarByName("x_0")
+        expected_bounds = sth.prob.variables()[0].bounds
+        actual_bounds = [x.LB, x.UB]
+        np.testing.assert_equal(actual_bounds, expected_bounds)
+
+    def test_mindopt_mi_lp_0(self) -> None:
+        StandardTestLPs.test_mi_lp_0(solver='MINDOPT')
+
+    def test_mindopt_mi_lp_1(self) -> None:
+        StandardTestLPs.test_mi_lp_1(solver='MINDOPT')
+
+    def test_mindopt_mi_lp_2(self) -> None:
+        StandardTestLPs.test_mi_lp_2(solver='MINDOPT')
+
+    def test_mindopt_mi_lp_3(self) -> None:
+        StandardTestLPs.test_mi_lp_3(solver='MINDOPT')
+
+    def test_mindopt_mi_lp_5(self) -> None:
+        StandardTestLPs.test_mi_lp_5(solver='MINDOPT')
+
+    def test_mindopt_mi_socp_1(self) -> None:
+        StandardTestSOCPs.test_mi_socp_1(solver='MINDOPT', places=2)
+
+    def test_mindopt_mi_socp_2(self) -> None:
+        StandardTestSOCPs.test_mi_socp_2(solver='MINDOPT')

@@ -36,3 +36,4 @@ from .sdpa_conif import SDPA
 from .xpress_conif import XPRESS
 from .highs_conif import HIGHS
 from .knitro_conif import KNITRO
+from .mindopt_conif import MINDOPT
